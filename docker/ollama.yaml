@@ -1,0 +1,19 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    hostname: ollama
+    ports:
+      - '11434:11434'
+    volumes:
+      - './conf/ollama:/usr/local/ollama'
+      - './data/ollama:/root/.ollama'
+    networks:
+      - bg-ai
+
+networks:
+  bg-ai:
+    driver: bridge
+    name: bg-ai
+
+
