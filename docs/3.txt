@@ -1,0 +1,1 @@
+dotProduct - 衡量相似度，类似于 cosine，但还会考虑向量的长度。如果对幅度进行归一化，则 cosine 和 dotProduct 在衡量相似性方面几乎相同。

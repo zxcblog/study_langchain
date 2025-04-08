@@ -1,0 +1,1 @@
+将 fields.similarity 设置为 dotProduct 值可让您根据角度和幅度有效地衡量相似性。 dotProduct 比 cosine 消耗的计算资源更少，并且在向量为单位长度时非常高效。
