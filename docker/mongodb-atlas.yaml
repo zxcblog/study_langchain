@@ -1,0 +1,19 @@
+services:
+  mongodb-atlas:
+    image: mongodb/mongodb-atlas-local:8.0.3
+    container_name: mongodb-atlas
+    hostname: mongodb-atlas
+    environment:
+      MONGODB_INITDB_ROOT_USERNAME: root
+      MONGODB_INITDB_ROOT_PASSWORD: 123456
+    ports:
+      - "27018:27017"
+    volumes:
+      - './conf/mongodb-atlas:/data/configdb'
+      - './data/mongodb-atlas:/data/db'
+    networks:
+      - bg-ai
+networks:
+  bg-ai:
+    driver: bridge
+    name: bg-ai
