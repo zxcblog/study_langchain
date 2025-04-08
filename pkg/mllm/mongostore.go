@@ -1,19 +1,18 @@
-package store
+package mllm
 
 import (
 	"context"
+	"errors"
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 	"time"
 )
 
-// 使用 mongodb-atlas 来存储向量
-type MongoStore struct {
-	uri      string // mongodb地址
-	dbName   string // 数据库名称
-	collName string // 集合名称
-	index    string // 索引名称
+type MongodbStore struct {
+	dbname   string
+	collname string
+	idx      string
 	client   *mongo.Client
 	coll     *mongo.Collection
 }
@@ -38,51 +37,59 @@ const (
 	FieldSimilarityCosine     FieldSimilarity = "cosine"     // 根据向量之间的角度衡量相似度
 	FieldSimilarityDotProduct FieldSimilarity = "dotProduct" // 与 cosine 类似地衡量相似度，但会考虑向量的大小
 
-	QwenAIEmbeddingDim = 2048 // 千问模型转换emb后的数值
-
 	VectorSearchType = "vectorSearch"
 )
 
-// NewMongoStore 获取到mongodb连接实例
-func NewMongoStore(uri, dbName, collName string) (*MongoStore, error) {
+type Vector struct {
+	PageContent string         `bson:"page_content"`
+	Metadata    map[string]any `bson:"metadata"`
+}
+
+func NewMongodbStore(uri, dbname, collname, idx string) (*MongodbStore, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, err
 	}
 
-	coll := client.Database(dbName).Collection(collName)
-	return &MongoStore{uri: uri, dbName: dbName, collName: collName, client: client, coll: coll}, nil
+	coll := client.Database(dbname).Collection(collname)
+	return &MongodbStore{dbname: dbname, collname: collname, client: client, coll: coll, idx: idx}, nil
 }
 
-func (m *MongoStore) GetQwenField() Field {
-	return Field{
-		Type:          FieldTypeVector,
-		Path:          "plot_embedding", // mongodb vector默认字段
-		NumDimensions: QwenAIEmbeddingDim,
-		Similarity:    FieldSimilarityDotProduct,
-	}
-
+func (m *MongodbStore) Close(ctx context.Context) error {
+	return m.client.Disconnect(ctx)
 }
 
-// CreateIndex 创建 vectorSearch 索引， 如果没有传递字段，则使用默认字段创建索引
-// 使用mongodb-atlas做矢量库时， 需要对添加索引，否则查询时会查不到结果
-func (m *MongoStore) CreateIndex(ctx context.Context, idx string, fields ...Field) error {
-	ok, err := m.SelectIndex(ctx, idx)
-	if ok || err != nil {
-		return err
+func (m *MongodbStore) CreateCollection(ctx context.Context) error {
+	return m.client.Database(m.dbname).CreateCollection(ctx, m.collname)
+}
+
+func (m *MongodbStore) SelectIndex(ctx context.Context, idx string) (bool, error) {
+	indexs := m.coll.SearchIndexes()
+
+	siOpts := options.SearchIndexes().SetName(idx).SetType(VectorSearchType)
+	cursor, err := indexs.List(ctx, siOpts)
+	if err != nil {
+		return false, err
 	}
 
-	// 创建集合，
-	if err = m.client.Database(m.dbName).CreateCollection(ctx, m.collName); err != nil {
-		return err
+	if cursor == nil || (cursor.Current == nil && !cursor.Next(ctx)) {
+		return false, nil
+	}
+
+	name := cursor.Current.Lookup("name").StringValue()
+	queryable := cursor.Current.Lookup("queryable").Boolean()
+
+	return name == idx && queryable, nil
+}
+
+func (m *MongodbStore) CreateIndex(ctx context.Context, idx string, fields []Field) error {
+	if len(fields) < 1 {
+		return errors.New("索引字段不能为空")
 	}
 
 	indexs := m.coll.SearchIndexes()
 	// 设置创建的索引类型为 vectorSearch
 	siOpts := options.SearchIndexes().SetName(idx).SetType(VectorSearchType)
-	if len(fields) < 1 {
-		fields = []Field{m.GetQwenField()}
-	}
 
 	// 创建索引
 	searchName, err := indexs.CreateOne(ctx, mongo.SearchIndexModel{Definition: bson.M{"fields": fields}, Options: siOpts})
@@ -114,38 +121,7 @@ func (m *MongoStore) CreateIndex(ctx context.Context, idx string, fields ...Fiel
 	return nil
 }
 
-// SelectIndex 查询索引是否存在
-func (m *MongoStore) SelectIndex(ctx context.Context, idx string) (bool, error) {
-	indexs := m.coll.SearchIndexes()
-
-	siOpts := options.SearchIndexes().SetName(idx).SetType(VectorSearchType)
-	cursor, err := indexs.List(ctx, siOpts)
-	if err != nil {
-		return false, err
-	}
-
-	if cursor == nil {
-		return false, nil
-	}
-
-	if cursor.Current == nil {
-		if ok := cursor.Next(ctx); !ok {
-			return false, nil
-		}
-	}
-
-	name := cursor.Current.Lookup("name").StringValue()
-	queryable := cursor.Current.Lookup("queryable").Boolean()
-
-	return name == idx && queryable, nil
-}
-
-// Coll 获取coll集合
-func (m *MongoStore) Coll() *mongo.Collection {
-	return m.coll
-}
-
-// Close 关闭mongodb连接
-func (m *MongoStore) Close(ctx context.Context) error {
-	return m.client.Disconnect(ctx)
+func (m *MongodbStore) SelectCollection(ctx context.Context) bool {
+	colls, _ := m.client.Database(m.dbname).ListCollectionNames(ctx, bson.M{"name": m.collname})
+	return len(colls) > 0
 }
